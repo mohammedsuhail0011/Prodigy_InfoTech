@@ -1,0 +1,102 @@
+# scapy_sniffer_beginner.py
+# Simple packet sniffer written in a beginner-friendly style.
+# Requires scapy: pip install scapy
+# Run as root/admin: sudo python3 scapy_sniffer_beginner.py
+
+import argparse
+import time
+from scapy.all import sniff, IP, TCP, UDP, ICMP, Raw
+
+# How many bytes of payload to show (short preview)
+SHOW_BYTES = 64
+
+# Convert bytes to a short hex + printable-ASCII string
+def make_preview(data):
+    if not data:
+        return "(no payload)"
+    # cut to the number of bytes we want to show
+    part = data[:SHOW_BYTES]
+    # hex part: 2-digit hex for each byte
+    hex_str = " ".join(f"{b:02x}" for b in part)
+    # ascii part: printable characters or '.' otherwise
+    ascii_str = "".join(chr(b) if 32 <= b < 127 else "." for b in part)
+    if len(data) > SHOW_BYTES:
+        return hex_str + " ...\nASCII: " + ascii_str + "..."
+    else:
+        return hex_str + "\nASCII: " + ascii_str
+
+# This function is called for every packet we capture
+def show_packet(packet):
+    # timestamp for the packet
+    t = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+    # try to get the IPv4 layer
+    ip = packet.getlayer(IP)
+    if ip is None:
+        # not an IPv4 packet (for example ARP or IPv6)
+        print(f"[{t}] Non-IPv4 packet: {packet.summary()}")
+        print("-" * 60)
+        return
+
+    src = ip.src
+    dst = ip.dst
+
+    # default values (if no ports exist)
+    src_port = "-"
+    dst_port = "-"
+    proto_name = "OTHER"
+
+    # check for common transport protocols
+    if packet.haslayer(TCP):
+        proto_name = "TCP"
+        src_port = packet[TCP].sport
+        dst_port = packet[TCP].dport
+    elif packet.haslayer(UDP):
+        proto_name = "UDP"
+        src_port = packet[UDP].sport
+        dst_port = packet[UDP].dport
+    elif packet.haslayer(ICMP):
+        proto_name = "ICMP"
+
+    # print a simple summary line
+    print(f"[{t}] {src}:{src_port} -> {dst}:{dst_port}   {proto_name}   len={len(packet)}")
+
+    # if there is raw payload data, print a short preview
+    if packet.haslayer(Raw):
+        raw_bytes = bytes(packet[Raw].load)
+        print("Payload preview (hex / ASCII):")
+        print(make_preview(raw_bytes))
+    else:
+        print("No payload captured or payload not shown.")
+
+    print("-" * 60)
+
+def main():
+    parser = argparse.ArgumentParser(description="Beginner-friendly Scapy sniffer")
+    parser.add_argument("-i", "--iface", help="Interface to listen on (e.g., eth0). Default = scapy chooses", default=None)
+    parser.add_argument("-c", "--count", type=int, help="How many packets to capture (0 = forever)", default=0)
+    parser.add_argument("-f", "--filter", help="BPF filter like 'tcp and port 80' (optional)", default=None)
+    args = parser.parse_args()
+
+    print("Starting sniffer. Press Ctrl-C to stop.")
+    print("Interface:", args.iface or "default (scapy chooses)")
+    print("Filter:", args.filter or "none")
+    print("")
+
+    try:
+        # sniff() will call show_packet for each packet
+        sniff(iface=args.iface,
+              prn=show_packet,
+              filter=args.filter,
+              count=args.count or 0,
+              store=False,
+              promisc=True)
+    except PermissionError:
+        print("Permission denied. Try running with sudo or as Administrator.")
+    except KeyboardInterrupt:
+        print("\nStopped by user.")
+    except Exception as e:
+        print("An error happened:", e)
+
+if __name__ == "__main__":
+    main()
